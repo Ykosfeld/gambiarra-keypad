@@ -8,6 +8,8 @@
 #include <WiFiManager.h>
 #include <ESPmDNS.h>
 
+// teste da config de wallet vscodium
+
 // --- DEFINIÇÕES DE PINOS ---
 #define BTN_1 32
 #define BTN_2 33
