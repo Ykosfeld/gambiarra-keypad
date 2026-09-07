@@ -9,6 +9,7 @@
 #include <ESPmDNS.h>
 
 // teste da config de wallet vscodium
+// teste ssh
 
 // --- DEFINIÇÕES DE PINOS ---
 #define BTN_1 32
