@@ -71,30 +71,84 @@ Este projeto utiliza o **PlatformIO**. Para compilar e enviar o código para a p
 
 ## 🐧 Integração de Mídia (Linux)
 
-Para que o ESP32 exiba o nome da música e artista que estão tocando no seu computador, é necessário rodar o script Python de ponte.
+Para que o ESP32 exiba o nome da música e artista que estão tocando no seu computador, é necessário rodar o script Python de ponte (`leitor_midia.py`), que lê os metadados via **MPRIS** (o mesmo padrão usado pela aba de reprodução de mídia do KDE Plasma) e envia para `http://gambiarra.local/update`.
 
 ### Dependências
-No seu terminal Linux, instale o controlador de mídia e a biblioteca HTTP:
+
 ```bash
-sudo dnf install playerctl  # No Fedora/RedHat
+sudo dnf install playerctl   # Fedora
 # ou sudo apt install playerctl (Debian/Ubuntu)
 pip install requests
 ```
 
+### Rodando o script
+
+```bash
+python3 leitor_midia.py --url http://gambiarra.local
+```
+
+Use `--debug` para ver o log detalhado de cada faixa detectada, e `--interval` para ajustar o intervalo de checagem (padrão: 2s).
+
+### ⚠️ Streaming em navegador (YouTube Music, etc.)
+
+Players "nativos" como Spotify Desktop ou VLC expõem artista e música corretamente via MPRIS sem configuração extra. **Streaming pelo navegador é diferente**: o MPRIS nativo do Chrome/Chromium/Brave para abas costuma repassar só o **título da aba**, não os metadados reais da página — então em vez de `Artista: Muse` / `Música: Madness`, o `playerctl` recebe algo como `Música: Madness | YouTube Music` e artista vazio.
+
+O `leitor_midia.py` já tem um fallback que limpa esse sufixo (`| YouTube Music`, `- YouTube Music`, etc.), mas sem artista de verdade. Para ter artista e música separados corretamente, instale o **bridge do [mprisence](https://github.com/lazykern/mprisence)**, que expõe um player MPRIS dedicado (`mprisence_web...`) com os metadados reais da Media Session da página. O script já prioriza esse player automaticamente quando ele existe.
+
+**Instalação (Fedora):**
+
+```bash
+# 1. Toolchain de build (Rust + C/C++ + OpenSSL)
+sudo dnf install cargo openssl-devel pkgconf-pkg-config gcc gcc-c++ cmake make
+
+# 2. Instalar o binário
+cargo install mprisence
+
+# 3. Garantir que ~/.cargo/bin está no PATH
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc   # ou ~/.zshrc, conforme seu shell
+source ~/.bashrc
+
+# 4. Instalar a extensão do navegador pela loja correspondente
+#    Firefox: https://addons.mozilla.org/en-US/firefox/addon/mprisence-bridge/
+#    Chrome/Chromium/Brave/Edge/Vivaldi: https://chromewebstore.google.com/detail/pnkkjbdopihogobhhjbgapbpfccinjjo
+
+# 5. Registrar o native host e verificar
+mprisence web install
+mprisence web doctor
+```
+
+Recarregue a aba do site de streaming (ex: `music.youtube.com`) depois de instalar a extensão, e confirme com:
+
+```bash
+playerctl -l | grep mprisence_web
+```
+
+**Brave (e possivelmente outros navegadores baseados em Chromium fora Chrome/Chromium puro):** o `mprisence web install` só escreve o manifest do native host nas pastas de Firefox, Chromium e Google Chrome. Brave usa uma pasta própria, então é preciso copiar manualmente:
+
+```bash
+mkdir -p ~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts
+cp ~/.config/chromium/NativeMessagingHosts/mprisence.web.bridge.json \
+   ~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/
+```
+
+Depois reinicie o navegador por completo (feche todas as janelas, ou `brave://restart`).
+
+*Nota:* não é necessário deixar o `mprisence` rodando em segundo plano nem configurar Discord Rich Presence — o `web install` só registra o native host, que o navegador invoca sob demanda. Se aparecerem players MPRIS duplicados (ex: o do próprio navegador e o do `plasma-browser-integration` do KDE), não tem problema: o script já prioriza `mprisence_web` e ignora os outros automaticamente.
+
 ### Configurando o Serviço (Systemd)
-O script leitor_midia.py escuta as mudanças de faixa e envia requisições HTTP para `http://gambiarra.local/update`. Para rodá-lo em segundo plano automaticamente:
 
-Edite o script informando o IP ou domínio mDNS correto do seu ESP32.
+Para rodar o `leitor_midia.py` em segundo plano automaticamente:
 
-Crie um serviço de usuário do systemd em `~/.config/systemd/user/gambiarra.service.`
-
-Ative e inicie o serviço:
+1. Copie `leitor_midia.py` para um local fixo, ex: `~/gambiarra-keypad/leitor_midia.py`.
+2. Copie o arquivo `gambiarra.service` (incluído no repositório) para `~/.config/systemd/user/`, ajustando o `ExecStart` se necessário.
+3. Ative e inicie o serviço:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable gambiarra.service
-systemctl --user start gambiarra.service
+systemctl --user enable --now gambiarra.service
 ```
+
+Para ver os logs em tempo real: `journalctl --user -u gambiarra.service -f`
 
 ---
 
