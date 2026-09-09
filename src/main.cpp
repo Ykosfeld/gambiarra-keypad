@@ -15,6 +15,7 @@
 #define BTN_1 32
 #define BTN_2 33
 #define BTN_MODO 13
+#define PINO_VIBRACAO 14
 
 // --- CONFIGURAÇÃO DO DISPLAY ---
 #define SCREEN_WIDTH 128
@@ -39,6 +40,61 @@ bool faseFoco = true;
 // --- VARIÁVEIS DE DEBOUNCE ---
 unsigned long ultimoClique = 0;
 int atrasoDebounce = 250;
+
+// --- VARIÁVEIS DE VIBRAÇÃO ---
+bool vibrando = false;
+unsigned long marcoTempoVibracao = 0;
+int duracaoAtualVibracao = 0;
+int pulsosRestantes = 0;
+int duracaoPulsoPadrao = 0;
+int pausaPulsoPadrao = 0;
+bool emPausaEntrePulsos = false;
+
+// Pulso único (ex: confirmação simples)
+void iniciarVibracao(int duracaoMs) {
+  pulsosRestantes = 0;
+  digitalWrite(PINO_VIBRACAO, HIGH);
+  vibrando = true;
+  emPausaEntrePulsos = false;
+  marcoTempoVibracao = millis();
+  duracaoAtualVibracao = duracaoMs;
+}
+
+// Padrão de múltiplos pulsos (ex: alerta de "BLE desconectado")
+void iniciarPadraoVibracao(int numPulsos, int duracaoPulsoMs, int pausaMs) {
+  duracaoPulsoPadrao = duracaoPulsoMs;
+  pausaPulsoPadrao = pausaMs;
+  pulsosRestantes = numPulsos - 1; // o pulso atual já conta como o primeiro
+  digitalWrite(PINO_VIBRACAO, HIGH);
+  vibrando = true;
+  emPausaEntrePulsos = false;
+  marcoTempoVibracao = millis();
+  duracaoAtualVibracao = duracaoPulsoMs;
+}
+
+void checarVibracao() {
+  if (!vibrando) return;
+  unsigned long decorrido = millis() - marcoTempoVibracao;
+
+  if (decorrido < (unsigned long)duracaoAtualVibracao) return;
+
+  if (!emPausaEntrePulsos) {
+    digitalWrite(PINO_VIBRACAO, LOW);
+    if (pulsosRestantes > 0) {
+      emPausaEntrePulsos = true;
+      marcoTempoVibracao = millis();
+      duracaoAtualVibracao = pausaPulsoPadrao;
+    } else {
+      vibrando = false;
+    }
+  } else {
+    pulsosRestantes--;
+    digitalWrite(PINO_VIBRACAO, HIGH);
+    emPausaEntrePulsos = false;
+    marcoTempoVibracao = millis();
+    duracaoAtualVibracao = duracaoPulsoPadrao;
+  }
+}
 
 // --- DADOS DE MÍDIA (Recebidos via Web) ---
 String musicaAtual = "Nenhuma musica";
@@ -104,7 +160,7 @@ void atualizarTela() {
     display.println("B2: Colar (Ctrl+V)");
   } 
   else if (modoAtual == MIDIA) {
-    display.println("--- CONTROLE MIDIA ---");
+    display.println("--- CONTROLE MIDIA --");
     display.setCursor(0, 16);
     display.println(artistaAtual);
     display.setCursor(0, 32);
@@ -145,12 +201,17 @@ void handleStatus() {
 void handleCmd() {
   if (server.hasArg("acao")) {
     String acao = server.arg("acao");
-    if (acao == "playpause" && bleKeyboard.isConnected()) {
-      bleKeyboard.write(KEY_MEDIA_PLAY_PAUSE);
-    } else if (acao == "next" && bleKeyboard.isConnected()) {
-      bleKeyboard.write(KEY_MEDIA_NEXT_TRACK);
-    } else if (acao == "prev" && bleKeyboard.isConnected()) {
-      bleKeyboard.write(KEY_MEDIA_PREVIOUS_TRACK);
+    if (bleKeyboard.isConnected()) {
+      if (acao == "playpause") {
+        bleKeyboard.write(KEY_MEDIA_PLAY_PAUSE);
+      } else if (acao == "next") {
+        bleKeyboard.write(KEY_MEDIA_NEXT_TRACK);
+      } else if (acao == "prev") {
+        bleKeyboard.write(KEY_MEDIA_PREVIOUS_TRACK);
+      }
+      iniciarVibracao(50);
+    } else {
+      iniciarPadraoVibracao(2, 60, 80);
     }
   }
   server.send(200, "text/plain", "OK");
@@ -166,51 +227,57 @@ void handleUpdateMedia() {
 }
 
 void executarAcaoBotao1() {
-  if (modoAtual == PRODUTIVIDADE && bleKeyboard.isConnected()) {
-    // Variável estática para alternar o estado (lembra o valor entre um clique e outro)
-    static bool alternadorWorkspace = false;
-
-    // Pressiona as teclas Modificadoras comuns: Super/Meta (Windows Key) + Left Ctrl
-    bleKeyboard.press(KEY_LEFT_GUI); // Meta / Windows
-    bleKeyboard.press(KEY_LEFT_CTRL);
-
-    if (alternadorWorkspace) {
-      // Comando A: Seta Direita (Próximo Workspace)
-      bleKeyboard.press(KEY_RIGHT_ARROW);
+  if (modoAtual == PRODUTIVIDADE) {
+    if (bleKeyboard.isConnected()) {
+      static bool alternadorWorkspace = false;
+      bleKeyboard.press(KEY_LEFT_GUI);
+      bleKeyboard.press(KEY_LEFT_CTRL);
+      if (alternadorWorkspace) {
+        bleKeyboard.press(KEY_RIGHT_ARROW);
+      } else {
+        bleKeyboard.press(KEY_LEFT_ARROW);
+      }
       delay(50);
       bleKeyboard.releaseAll();
-      Serial.println("Ação Proj: Workspace Direita");
+      alternadorWorkspace = !alternadorWorkspace;
+      iniciarVibracao(50); // confirmação
     } else {
-      // Comando B: Seta Esquerda (Workspace Anterior)
-      bleKeyboard.press(KEY_LEFT_ARROW);
-      delay(50);
-      bleKeyboard.releaseAll();
-      Serial.println("Ação Proj: Workspace Esquerda");
+      iniciarPadraoVibracao(2, 60, 80); // alerta: BLE desconectado
     }
-
-    // Inverte o estado para o próximo clique
-    alternadorWorkspace = !alternadorWorkspace;
-  } 
-  else if (modoAtual == MIDIA && bleKeyboard.isConnected()) {
-    // Continua sendo Diminuir Volume
-    bleKeyboard.write(KEY_MEDIA_VOLUME_DOWN);
+  }
+  else if (modoAtual == MIDIA) {
+    if (bleKeyboard.isConnected()) {
+      bleKeyboard.write(KEY_MEDIA_VOLUME_DOWN);
+      iniciarVibracao(50);
+    } else {
+      iniciarPadraoVibracao(2, 60, 80);
+    }
   }
   else if (modoAtual == POMODORO) {
-    // Inicia ou pausa o Pomodoro
     pomodoroAtivo = !pomodoroAtivo;
     atualizarTela();
   }
 }
 
 void executarAcaoBotao2() {
-  if (modoAtual == PRODUTIVIDADE && bleKeyboard.isConnected()) {
-    bleKeyboard.press(KEY_LEFT_CTRL);
-    bleKeyboard.press('v');
-    delay(50);
-    bleKeyboard.releaseAll();
-  } 
-  else if (modoAtual == MIDIA && bleKeyboard.isConnected()) {
-    bleKeyboard.write(KEY_MEDIA_PLAY_PAUSE);
+  if (modoAtual == PRODUTIVIDADE) {
+    if (bleKeyboard.isConnected()) {
+      bleKeyboard.press(KEY_LEFT_CTRL);
+      bleKeyboard.press('v');
+      delay(50);
+      bleKeyboard.releaseAll();
+      iniciarVibracao(50);
+    } else {
+      iniciarPadraoVibracao(2, 60, 80);
+    }
+  }
+  else if (modoAtual == MIDIA) {
+    if (bleKeyboard.isConnected()) {
+      bleKeyboard.write(KEY_MEDIA_PLAY_PAUSE);
+      iniciarVibracao(50);
+    } else {
+      iniciarPadraoVibracao(2, 60, 80);
+    }
   }
   else if (modoAtual == POMODORO) {
     pomodoroAtivo = false;
@@ -226,6 +293,8 @@ void setup() {
   pinMode(BTN_1, INPUT_PULLUP);
   pinMode(BTN_2, INPUT_PULLUP);
   pinMode(BTN_MODO, INPUT_PULLUP);
+  pinMode(PINO_VIBRACAO, OUTPUT);
+  digitalWrite(PINO_VIBRACAO, LOW);
 
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("Falha ao iniciar SSD1306"));
