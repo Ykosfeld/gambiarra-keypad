@@ -1,0 +1,13 @@
+[Unit]
+Description=Gambiarra Keypad - Ponte de mídia (playerctl -> ESP32)
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Ajuste o caminho abaixo para onde você salvou o leitor_midia.py
+ExecStart=/usr/bin/python3 %h/gambiarra-keypad/leitor_midia.py --url http://gambiarra.local
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
