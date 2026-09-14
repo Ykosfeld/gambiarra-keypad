@@ -247,7 +247,7 @@ void executarAcaoBotao1() {
   }
   else if (modoAtual == MIDIA) {
     if (bleKeyboard.isConnected()) {
-      bleKeyboard.write(KEY_MEDIA_VOLUME_DOWN);
+      bleKeyboard.write(KEY_MEDIA_NEXT_TRACK);
       iniciarVibracao(50);
     } else {
       iniciarPadraoVibracao(2, 60, 80);
@@ -330,6 +330,7 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  checarVibracao();
   unsigned long tempoAtual = millis();
   
   // LÓGICA DO POMODORO
