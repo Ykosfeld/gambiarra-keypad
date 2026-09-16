@@ -17,6 +17,11 @@
 #define BTN_MODO 13
 #define PINO_VIBRACAO 14
 
+// --- ENCODER ROTATIVO KY-040 ---
+#define ENCODER_CLK 27
+#define ENCODER_DT 26
+#define ENCODER_SW 25
+
 // --- CONFIGURAÇÃO DO DISPLAY ---
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -28,7 +33,7 @@ WebServer server(80);
 
 // --- ESTADOS DOS MODOS ---
 enum Modos { PRODUTIVIDADE, MIDIA, POMODORO };
-int modoAtual = PRODUTIVIDADE;
+volatile int modoAtual = PRODUTIVIDADE;
 const int TOTAL_MODOS = 3;
 
 // --- VARIÁVEIS POMODORO ---
@@ -37,9 +42,25 @@ unsigned long ultimoMillis = 0;
 bool pomodoroAtivo = false;
 bool faseFoco = true;
 
-// --- VARIÁVEIS DE DEBOUNCE ---
+// --- VARIÁVEIS DE DEBOUNCE (botões físicos) ---
 unsigned long ultimoClique = 0;
 int atrasoDebounce = 250;
+
+// --- VARIÁVEIS DO ENCODER (acessadas pela ISR) ---
+volatile bool precisaAtualizarTela = false;
+
+// Tabela de transição de estados (decodificação em quadratura, "full-step").
+// Índice = (estado anterior de 2 bits << 2) | (estado atual de 2 bits).
+// Valores 0 = transição inválida/repique -> ignorada. Isso é o que evita
+// o "vai e volta" causado por bounce mecânico do KY-040.
+const int8_t tabelaEncoder[16] = {
+   0, -1,  1,  0,
+   1,  0,  0, -1,
+  -1,  0,  0,  1,
+   0,  1, -1,  0
+};
+volatile uint8_t estadoEncoder = 0;   // últimos 4 bits de histórico (CLK,DT anterior + CLK,DT atual)
+volatile int8_t acumuladorEncoder = 0; // soma os quarto-de-passo até completar um clique (+-4)
 
 // --- VARIÁVEIS DE VIBRAÇÃO ---
 bool vibrando = false;
@@ -93,6 +114,30 @@ void checarVibracao() {
     emPausaEntrePulsos = false;
     marcoTempoVibracao = millis();
     duracaoAtualVibracao = duracaoPulsoPadrao;
+  }
+}
+
+// --- ISR DO ENCODER ---
+// Roda a cada mudança em CLK OU em DT. Só mexe em variáveis simples,
+// nada de I2C/display aqui dentro (por isso a flag precisaAtualizarTela).
+void IRAM_ATTR isrEncoder() {
+  uint8_t atual = (digitalRead(ENCODER_CLK) << 1) | digitalRead(ENCODER_DT);
+  estadoEncoder = ((estadoEncoder << 2) | atual) & 0x0F;
+
+  int8_t movimento = tabelaEncoder[estadoEncoder];
+  if (movimento == 0) return; // transição inválida (repique) -> ignora
+
+  acumuladorEncoder += movimento;
+
+  // Um detent (clique físico) completo = 4 quarto-de-passo na mesma direção
+  if (acumuladorEncoder >= 4) {
+    modoAtual = (modoAtual + 1) % TOTAL_MODOS;
+    acumuladorEncoder = 0;
+    precisaAtualizarTela = true;
+  } else if (acumuladorEncoder <= -4) {
+    modoAtual = (modoAtual - 1 + TOTAL_MODOS) % TOTAL_MODOS;
+    acumuladorEncoder = 0;
+    precisaAtualizarTela = true;
   }
 }
 
@@ -296,6 +341,13 @@ void setup() {
   pinMode(PINO_VIBRACAO, OUTPUT);
   digitalWrite(PINO_VIBRACAO, LOW);
 
+  // Encoder KY-040
+  pinMode(ENCODER_CLK, INPUT_PULLUP);
+  pinMode(ENCODER_DT, INPUT_PULLUP);
+  pinMode(ENCODER_SW, INPUT_PULLUP); // reservado para futuro (ex: troca de perfil)
+  attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), isrEncoder, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_DT), isrEncoder, CHANGE);
+
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("Falha ao iniciar SSD1306"));
   }
@@ -332,6 +384,14 @@ void loop() {
   server.handleClient();
   checarVibracao();
   unsigned long tempoAtual = millis();
+
+  // ENCODER: a ISR só troca modoAtual e levanta a flag; aqui no loop()
+  // é seguro mexer no display (I2C) e disparar a vibração de feedback.
+  if (precisaAtualizarTela) {
+    precisaAtualizarTela = false;
+    atualizarTela();
+    iniciarVibracao(80); // feedback tátil de troca de modo (ver doc 1.1)
+  }
   
   // LÓGICA DO POMODORO
   if (pomodoroAtivo && (tempoAtual - ultimoMillis >= 1000)) {
@@ -360,6 +420,7 @@ void loop() {
     bool estadoAtualB2 = digitalRead(BTN_2);
 
     // --- BOTÃO DE MODO (Detecta quando é pressionado: HIGH para LOW) ---
+    // Mantido como alternativa ao encoder: qualquer um dos dois troca o modo.
     if (estadoAnteriorModo == HIGH && estadoAtualModo == LOW) {
       modoAtual = (modoAtual + 1) % TOTAL_MODOS;
       atualizarTela();
