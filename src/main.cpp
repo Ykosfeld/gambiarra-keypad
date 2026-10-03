@@ -154,67 +154,166 @@ const char paginaHTML[] PROGMEM = R"rawliteral(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gambiarra Keypad</title>
   <style>
-    body { font-family: sans-serif; background: #121212; color: #e0e0e0; text-align: center; margin: 0; padding: 20px; }
-    h1 { color: #bb86fc; font-size: 1.5rem; }
-    .card { background: #1e1e1e; padding: 20px; border-radius: 12px; margin: 15px auto; max-width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-    .btn { background: #bb86fc; color: #121212; border: none; padding: 12px 20px; margin: 8px; font-size: 1rem; font-weight: bold; border-radius: 8px; cursor: pointer; width: 80%; }
-    .btn:active { background: #9955e8; }
-    #info { font-size: 1.1rem; color: #03dac6; margin: 10px 0; }
+    :root {
+      --bg: #121212;
+      --panel: #1e1e1e;
+      --panel-strong: #262626;
+      --primary: #bb86fc;
+      --primary-strong: #9955e8;
+      --text: #e0e0e0;
+      --muted: #a8a8a8;
+      --ok: #03dac6;
+      --warn: #ffb74d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 20px; font-family: sans-serif;
+      background: var(--bg); color: var(--text); text-align: center;
+    }
+    h1 { color: var(--primary); font-size: 1.5rem; margin-bottom: 12px; }
+    .card {
+      background: var(--panel); padding: 18px; border-radius: 12px;
+      margin: 15px auto; max-width: 420px; box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    }
+    .status-line {
+      display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px;
+    }
+    .pill {
+      background: var(--panel-strong); color: var(--text); border-radius: 999px;
+      padding: 6px 12px; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.08);
+    }
+    .pill.ok { color: var(--ok); }
+    .pill.off { color: var(--warn); }
+    .label { color: var(--muted); font-size: 0.82rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    .value { margin-top: 8px; font-size: 1.05rem; }
+    .btn {
+      background: var(--primary); color: #121212; border: none; padding: 12px 20px;
+      margin: 8px; font-size: 1rem; font-weight: bold; border-radius: 8px;
+      cursor: pointer; width: 80%; display: block; margin-left: auto; margin-right: auto;
+    }
+    .btn:active { background: var(--primary-strong); }
   </style>
 </head>
 <body>
-  <h1>Gambiarra Keypad Web</h1>
+  <h1>Gambiarra Keypad</h1>
   <div class="card">
-    <h3>Midia Atual</h3>
-    <p id="artista">Artista: Carregando...</p>
-    <p id="musica">Musica: Carregando...</p>
+    <div class="status-line">
+      <span id="bleStatus" class="pill">BLE: Verificando...</span>
+      <span id="wifiStatus" class="pill">WiFi: Verificando...</span>
+    </div>
+    <div class="label">Mídia atual</div>
+    <div class="value" id="artista">Artista: Carregando...</div>
+    <div class="value" id="musica">Música: Carregando...</div>
   </div>
   <div class="card">
-    <h3>Controles</h3>
+    <div class="label">Controles</div>
     <button class="btn" onclick="enviarComando('prev')">|&lt; Anterior</button>
     <button class="btn" onclick="enviarComando('playpause')">Play / Pause</button>
-    <button class="btn" onclick="enviarComando('next')">Proxima &gt;|</button>
+    <button class="btn" onclick="enviarComando('next')">Próxima &gt;|</button>
   </div>
 <script>
+  function atualizarStatusUI(data) {
+    const ble = document.getElementById('bleStatus');
+    const wifi = document.getElementById('wifiStatus');
+    ble.textContent = 'BLE: ' + (data.ble === 'OK' ? 'Conectado' : 'Desconectado');
+    ble.className = 'pill ' + (data.ble === 'OK' ? 'ok' : 'off');
+    wifi.textContent = 'WiFi: ' + (data.wifi === 'OK' ? 'Conectado' : 'Desconectado');
+    wifi.className = 'pill ' + (data.wifi === 'OK' ? 'ok' : 'off');
+    document.getElementById('artista').innerText = 'Artista: ' + (data.artista || 'Sem artista');
+    document.getElementById('musica').innerText = 'Música: ' + (data.musica || 'Sem reprodução');
+  }
+
   function enviarComando(cmd) {
     fetch('/cmd?acao=' + cmd);
   }
-  setInterval(() => {
+
+  function carregarStatus() {
     fetch('/status')
       .then(res => res.json())
-      .then(data => {
-        document.getElementById('artista').innerText = "Artista: " + data.artista;
-        document.getElementById('musica').innerText = "Musica: " + data.musica;
+      .then(data => atualizarStatusUI(data))
+      .catch(() => {
+        document.getElementById('bleStatus').textContent = 'BLE: Indisponível';
+        document.getElementById('wifiStatus').textContent = 'WiFi: Indisponível';
       });
-  }, 2000);
+  }
+
+  carregarStatus();
+  setInterval(carregarStatus, 2000);
 </script>
 </body>
 </html>
 )rawliteral";
+
+String escaparJson(const String& valor) {
+  String saida;
+  for (size_t i = 0; i < valor.length(); ++i) {
+    char c = valor[i];
+    switch (c) {
+      case '\\': saida += "\\\\"; break;
+      case '"': saida += "\\\""; break;
+      case '\n': saida += "\\n"; break;
+      case '\r': break;
+      default: saida += c; break;
+    }
+  }
+  return saida;
+}
+
+String limitarTexto(const String& valor, size_t maxLen = 20) {
+  String texto = valor;
+  texto.trim();
+  if (texto.length() > maxLen) {
+    texto = texto.substring(0, maxLen - 3) + "...";
+  }
+  return texto;
+}
+
+String truncarTexto(const String& valor, size_t maxChars) {
+  String texto = valor;
+  texto.trim();
+  if (texto.length() <= maxChars) return texto;
+  if (maxChars <= 3) return texto.substring(0, maxChars);
+  return texto.substring(0, maxChars - 3) + "...";
+}
+
+String statusConexao() {
+  String status = "BLE:";
+  status += bleKeyboard.isConnected() ? "OK" : "OFF";
+  status += " | WiFi:";
+  status += WiFi.status() == WL_CONNECTED ? "OK" : "OFF";
+  return status;
+}
 
 void atualizarTela() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
   display.setCursor(0, 0);
-  
+
   if (modoAtual == PRODUTIVIDADE) {
-    display.println("--- PRODUTIVIDADE ---");
-    display.setCursor(0, 20);
-    display.println("B1: Copiar (Ctrl+C)");
-    display.println("B2: Colar (Ctrl+V)");
-  } 
+    display.println("PRODUTIVIDADE");
+    display.setCursor(0, 12);
+    display.println(statusConexao());
+    display.setCursor(0, 24);
+    display.println("A1: Alternar WS");
+    display.setCursor(0, 34);
+    display.println("A2: Colar");
+  }
   else if (modoAtual == MIDIA) {
-    display.println("--- CONTROLE MIDIA --");
-    display.setCursor(0, 16);
-    display.println(artistaAtual);
-    display.setCursor(0, 32);
-    display.println(musicaAtual);
-  } 
+    display.println("MIDIA");
+    display.setCursor(0, 12);
+    display.println(statusConexao());
+    display.setCursor(0, 24);
+    display.println("Artista: " + truncarTexto(artistaAtual, 18));
+    display.setCursor(0, 34);
+    display.println("Musica: " + truncarTexto(musicaAtual, 18));
+  }
   else if (modoAtual == POMODORO) {
-    display.println("--- MODO POMODORO ---");
+    display.println("FOCO");
+    display.setCursor(0, 12);
+    display.println(statusConexao());
     display.setTextSize(2);
-    display.setCursor(20, 20);
+    display.setCursor(22, 24);
     int minutos = tempoRestante / 60;
     int segundos = tempoRestante % 60;
     if(minutos < 10) display.print("0");
@@ -222,15 +321,16 @@ void atualizarTela() {
     display.print(":");
     if(segundos < 10) display.print("0");
     display.println(segundos);
-    
+
     display.setTextSize(1);
-    display.setCursor(0, 45);
+    display.setCursor(0, 52);
     display.print("Fase: ");
     display.print(faseFoco ? "FOCO" : "PAUSA");
   }
 
   display.setCursor(0, 56);
-  display.print("IP/Web: Ativo");
+  display.print("Status: ");
+  display.print(bleKeyboard.isConnected() ? "OK" : "Sem BLE");
   display.display();
 }
 
@@ -239,7 +339,11 @@ void handleRoot() {
 }
 
 void handleStatus() {
-  String json = "{\"artista\":\"" + artistaAtual + "\",\"musica\":\"" + musicaAtual + "\"}";
+  String json = "{\"artista\":\"" + escaparJson(artistaAtual)
+              + "\",\"musica\":\"" + escaparJson(musicaAtual)
+              + "\",\"ble\":\"" + (bleKeyboard.isConnected() ? "OK" : "OFF")
+              + "\",\"wifi\":\"" + (WiFi.status() == WL_CONNECTED ? "OK" : "OFF")
+              + "\"}";
   server.send(200, "application/json", json);
 }
 
@@ -264,8 +368,8 @@ void handleCmd() {
 
 void handleUpdateMedia() {
   if (server.hasArg("artista") && server.hasArg("musica")) {
-    artistaAtual = server.arg("artista");
-    musicaAtual = server.arg("musica");
+    artistaAtual = limitarTexto(server.arg("artista"), 20);
+    musicaAtual = limitarTexto(server.arg("musica"), 20);
     if (modoAtual == MIDIA) atualizarTela();
   }
   server.send(200, "text/plain", "Atualizado");

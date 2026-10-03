@@ -74,6 +74,14 @@ class Faixa:
         )
 
 
+def normalizar_texto(texto: str, limite: int = TAM_MAX_CAMPO) -> str:
+    """Remove espaços extras e limita o tamanho para evitar overflow na tela."""
+    texto = (texto or "").strip()
+    if len(texto) > limite:
+        texto = texto[: max(0, limite - 3)] + "..."
+    return texto
+
+
 def _playerctl(args: list[str]) -> Optional[str]:
     """Roda um comando playerctl e retorna stdout limpo, ou None se falhar/vazio."""
     try:
@@ -146,10 +154,10 @@ def ler_faixa_atual() -> Optional[Faixa]:
     musica = _playerctl(["-p", player, "metadata", "title"]) or "Sem titulo"
     status = _playerctl(["-p", player, "status"]) or "Stopped"
 
-    musica = musica.strip()
+    musica = normalizar_texto(musica)
 
     if artista:
-        artista = artista.strip()
+        artista = normalizar_texto(artista)
     elif not eh_bridge:
         # Sem o bridge, o "title" costuma ser o título cru da aba
         # (ex: "Madness | YouTube Music"). Limpamos o sufixo do site, mas
@@ -160,8 +168,8 @@ def ler_faixa_atual() -> Optional[Faixa]:
         artista = ""
 
     return Faixa(
-        artista=artista[:TAM_MAX_CAMPO],
-        musica=musica[:TAM_MAX_CAMPO],
+        artista=normalizar_texto(artista, TAM_MAX_CAMPO),
+        musica=normalizar_texto(musica, TAM_MAX_CAMPO),
         tocando=(status == "Playing"),
     )
 
@@ -217,6 +225,9 @@ def main():
 
     if args.debug:
         log.setLevel(logging.DEBUG)
+
+    if args.interval <= 0:
+        parser.error("--interval deve ser maior que zero")
 
     try:
         loop_principal(args.url.rstrip("/"), args.interval)
