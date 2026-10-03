@@ -34,7 +34,7 @@ WebServer server(80);
 enum Modos { PRODUTIVIDADE, MIDIA, POMODORO };
 volatile int modoAtual = PRODUTIVIDADE;
 const int TOTAL_MODOS = 3;
-const char* nomesModos[TOTAL_MODOS] = { "Produtividade", "Midia", "Pomodoro" };
+const char* nomesModos[TOTAL_MODOS] = { "Produtividade", "Midia", "Foco" };
 
 // --- NAVEGAÇÃO DO MENU (100% encoder) ---
 enum NivelMenu { SELECIONANDO_MODO, DENTRO_DO_MODO };
@@ -133,15 +133,15 @@ void acaoMidiaProxima();
 void acaoPomodoroIniciarPausar();
 void acaoPomodoroResetar();
 
-const char* itensProdutividade[] = { "Trocar Workspace", "Colar (Ctrl+V)" };
+const char* itensProdutividade[] = { "Alternar WS", "Colar" };
 AcaoFuncao acoesProdutividade[]  = { acaoProdutividadeWorkspace, acaoProdutividadeColar };
 const int totalItensProdutividade = 2;
 
-const char* itensMidia[] = { "Faixa Anterior", "Play / Pause", "Proxima Faixa" };
+const char* itensMidia[] = { "Anterior", "Play/Pause", "Proxima" };
 AcaoFuncao acoesMidia[]  = { acaoMidiaAnterior, acaoMidiaPlayPause, acaoMidiaProxima };
 const int totalItensMidia = 3;
 
-const char* itensPomodoro[] = { "Iniciar / Pausar", "Resetar" };
+const char* itensPomodoro[] = { "Iniciar/Pausar", "Reset" };
 AcaoFuncao acoesPomodoro[]  = { acaoPomodoroIniciarPausar, acaoPomodoroResetar };
 const int totalItensPomodoro = 2;
 
@@ -234,6 +234,38 @@ const char paginaHTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
+String escaparJson(const String& valor) {
+  String saida;
+  for (size_t i = 0; i < valor.length(); ++i) {
+    char c = valor[i];
+    switch (c) {
+      case '\\': saida += "\\\\"; break;
+      case '"': saida += "\\\""; break;
+      case '\n': saida += "\\n"; break;
+      case '\r': break;
+      default: saida += c; break;
+    }
+  }
+  return saida;
+}
+
+String limitarTexto(const String& valor, size_t maxLen = 20) {
+  String texto = valor;
+  texto.trim();
+  if (texto.length() > maxLen) {
+    texto = texto.substring(0, maxLen - 3) + "...";
+  }
+  return texto;
+}
+
+String statusConexao() {
+  String status = "BLE:";
+  status += bleKeyboard.isConnected() ? "OK" : "OFF";
+  status += " | WiFi:";
+  status += WiFi.status() == WL_CONNECTED ? "OK" : "OFF";
+  return status;
+}
+
 // Desenha uma lista de itens com o selecionado em destaque (barra invertida).
 // "totalItens" é a quantidade de itens "reais"; sempre desenha mais um extra,
 // "< Voltar", ao final.
@@ -256,9 +288,11 @@ void desenharItensMenu(const char* itens[], int totalItens, int selecionado, int
 
 void desenharListaModos() {
   display.setCursor(0, 0);
-  display.println("Selecione o modo:");
+  display.println("Modo:");
+  display.setCursor(0, 10);
+  display.println(statusConexao());
   for (int i = 0; i < TOTAL_MODOS; i++) {
-    int y = 16 + i * 12;
+    int y = 24 + i * 12;
     if (i == modoAtual) {
       display.fillRect(0, y - 1, SCREEN_WIDTH, 11, SSD1306_WHITE);
       display.setTextColor(SSD1306_BLACK);
@@ -273,33 +307,47 @@ void desenharListaModos() {
 
 void desenharMenuProdutividade() {
   display.setCursor(0, 0);
-  display.println("-- PRODUTIVIDADE --");
-  desenharItensMenu(itensProdutividade, totalItensProdutividade, itemSelecionado, 16);
+  display.println("PRODUTIVIDADE");
+  display.setCursor(0, 10);
+  display.println(statusConexao());
+  desenharItensMenu(itensProdutividade, totalItensProdutividade, itemSelecionado, 22);
 }
 
 void desenharMenuMidia() {
   display.setCursor(0, 0);
-  display.println("-- MIDIA --");
+  display.println("MIDIA");
   display.setCursor(0, 10);
-  display.println(artistaAtual);
-  desenharItensMenu(itensMidia, totalItensMidia, itemSelecionado, 22);
+  display.println(statusConexao());
+
+  String artistaExibicao = artistaAtual.length() > 0 ? "Artista: " + limitarTexto(artistaAtual, 18) : "Artista: sem dado";
+  String musicaExibicao = musicaAtual.length() > 0 ? "Musica: " + limitarTexto(musicaAtual, 18) : "Musica: sem reproducao";
+
+  display.setCursor(0, 22);
+  display.println(artistaExibicao);
+  display.setCursor(0, 32);
+  display.println(musicaExibicao);
+  desenharItensMenu(itensMidia, totalItensMidia, itemSelecionado, 44);
 }
 
 void desenharMenuPomodoro() {
   display.setCursor(0, 0);
-  display.println("-- POMODORO --");
-
+  display.println("FOCO");
   display.setCursor(0, 10);
-  display.print(faseFoco ? "FOCO  " : "PAUSA ");
+  display.println(statusConexao());
+
+  display.setCursor(0, 22);
+  display.print(faseFoco ? "Fase: FOCO" : "Fase: PAUSA");
+  display.setCursor(0, 32);
   int minutos = tempoRestante / 60;
   int segundos = tempoRestante % 60;
+  display.print("Tempo: ");
   if (minutos < 10) display.print("0");
   display.print(minutos);
   display.print(":");
   if (segundos < 10) display.print("0");
   display.println(segundos);
 
-  desenharItensMenu(itensPomodoro, totalItensPomodoro, itemSelecionado, 22);
+  desenharItensMenu(itensPomodoro, totalItensPomodoro, itemSelecionado, 44);
 }
 
 void atualizarTela() {
@@ -325,7 +373,11 @@ void handleRoot() {
 }
 
 void handleStatus() {
-  String json = "{\"artista\":\"" + artistaAtual + "\",\"musica\":\"" + musicaAtual + "\"}";
+  String json = "{\"artista\":\"" + escaparJson(artistaAtual)
+              + "\",\"musica\":\"" + escaparJson(musicaAtual)
+              + "\",\"ble\":\"" + (bleKeyboard.isConnected() ? "OK" : "OFF")
+              + "\",\"wifi\":\"" + (WiFi.status() == WL_CONNECTED ? "OK" : "OFF")
+              + "\"}";
   server.send(200, "application/json", json);
 }
 
@@ -350,8 +402,8 @@ void handleCmd() {
 
 void handleUpdateMedia() {
   if (server.hasArg("artista") && server.hasArg("musica")) {
-    artistaAtual = server.arg("artista");
-    musicaAtual = server.arg("musica");
+    artistaAtual = limitarTexto(server.arg("artista"), 20);
+    musicaAtual = limitarTexto(server.arg("musica"), 20);
     if (modoAtual == MIDIA && nivelAtual == DENTRO_DO_MODO) atualizarTela();
   }
   server.send(200, "text/plain", "Atualizado");
