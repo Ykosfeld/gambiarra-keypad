@@ -22,7 +22,7 @@ Se o aparelho for ligado pela primeira vez, ele criará automaticamente 3 modos 
 2. **Discord:** B1 (Muta Mic - `GUI+DOWN`), B2 (Muta Fone - `GUI+UP`).
 3. **Estudo:** B1 (Macro Customizada - `SHIFT+GUI+RIGHT`).
 
-Gire o encoder até o final para acessar o **Modo CONFIGURACAO**, aperte B1 para ativar o Wi-Fi, conecte-se à rede `Gambiarra-Config` e acesse `http://192.168.4.1` para editar esses modos!
+Gire o encoder até o final para acessar o **Modo CONFIGURACAO**, aperte B1 para ativar o Wi-Fi, conecte-se à rede `Gambiarra-Config` e acesse `http://gambiarra.local` (ou `http://192.168.4.1`) para editar esses modos!
 
 ---
 
@@ -72,5 +72,5 @@ Este projeto utiliza o **PlatformIO**.
 O projeto está em constante evolução. Aqui estão algumas ideias para o futuro:
 
 - [ ] **Gabinete Customizado:** Modelar e imprimir em 3D um case definitivo para aposentar a protoboard e dar cara de produto final ao Macro Pad.
-- [ ] **Construtor Visual na Web:** Melhorar a interface do servidor Web (que hoje usa edição JSON direta) para uma interface rica com botões "drag and drop" e design responsivo.
+- [x] **Construtor Visual na Web:** Interface web moderna e amigável com editor de botões, seleção de multimídia/macros, atalhos de modificadores e sincronização com JSON.
 - [ ] **Ações de Hold (Clique Longo):** Expandir a configuração para suportar diferentes ações caso o usuário segure o botão ao invés de apenas clicar.

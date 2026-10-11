@@ -5,9 +5,12 @@
 #include <BleKeyboard.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
+#include <DNSServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include "web_page.h"
 
 // --- DEFINIÇÕES DE PINOS ---
 #define BTN_1 32
@@ -28,6 +31,8 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 // --- BLUETOOTH & WEB SERVER ---
 BleKeyboard bleKeyboard("Gambiarra Keypad", "Yuri", 100);
 WebServer server(80);
+DNSServer dnsServer;
+const byte DNS_PORT = 53;
 bool wifiConfigAtivo = false;
 unsigned long momentoSalvo = 0;
 bool exibirSalvo = false;
@@ -156,6 +161,18 @@ void drawMediaIcon(int x, int y, String val) {
     display.fillTriangle(x, y, x, y+12, x+8, y+6, SSD1306_WHITE);
     display.fillRect(x+10, y, 2, 12, SSD1306_WHITE);
     display.fillRect(x+14, y, 2, 12, SSD1306_WHITE);
+  } else if (val == "VOL_UP") {
+    display.setTextSize(1);
+    display.setCursor(x + 4, y + 2);
+    display.print("V+");
+  } else if (val == "VOL_DOWN") {
+    display.setTextSize(1);
+    display.setCursor(x + 4, y + 2);
+    display.print("V-");
+  } else if (val == "MUTE") {
+    display.setTextSize(1);
+    display.setCursor(x + 2, y + 2);
+    display.print("MUT");
   }
 }
 
@@ -207,8 +224,8 @@ void atualizarTela() {
         display.setTextSize(1);
       } else {
         display.println("WIFI:Gambiarra-Config");
-        display.println("IP: 192.168.4.1");
-        display.println("   [BLOQUEADO]   ");
+        display.println("gambiarra.local");
+        display.println("ou 192.168.4.1");
         display.println("B1 p/ Sair");
       }
     } else {
@@ -239,7 +256,7 @@ void setupDefaultModes() {
   modes.clear();
 
   Mode m1;
-  m1.name = "Controle de Midia";
+  m1.name = "Midia";
   m1.b1.type = "media"; m1.b1.val = "PREV";
   m1.b2.type = "media"; m1.b2.val = "PLAY_PAUSE";
   m1.b3.type = "media"; m1.b3.val = "NEXT";
@@ -340,51 +357,6 @@ void loadConfig() {
 
 // --- WEB SERVER ---
 
-const char htmlPage[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gambiarra Keypad Config</title>
-  <style>
-    body { font-family: sans-serif; background: #121212; color: #e0e0e0; margin: 0; padding: 20px; }
-    h1 { color: #bb86fc; text-align: center; }
-    textarea { width: 100%; height: 300px; background: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 10px; font-family: monospace; }
-    button { background: #bb86fc; color: #121212; border: none; padding: 10px 20px; margin-top: 10px; cursor: pointer; font-weight: bold; }
-    button:active { background: #9955e8; }
-  </style>
-</head>
-<body>
-  <h1>Configuracao</h1>
-  <p>Edite o JSON abaixo com cuidado. Modificacoes tem efeito imediato apos salvar.</p>
-  <textarea id="json-input"></textarea>
-  <br>
-  <button onclick="salvar()">Salvar e Aplicar</button>
-  <div id="status"></div>
-
-  <script>
-    fetch('/api/config').then(r => r.text()).then(txt => {
-      document.getElementById('json-input').value = txt;
-    });
-
-    function salvar() {
-      const val = document.getElementById('json-input').value;
-      try { JSON.parse(val); } catch(e) { alert("JSON invalido!"); return; }
-      fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: val
-      }).then(r => r.text()).then(txt => {
-        document.getElementById('status').innerText = "Salvo com sucesso!";
-        setTimeout(() => document.getElementById('status').innerText = "", 3000);
-      });
-    }
-  </script>
-</body>
-</html>
-)rawliteral";
-
 void handleRoot() {
   server.send_P(200, "text/html", htmlPage);
 }
@@ -418,17 +390,41 @@ void handlePostConfig() {
   server.send(200, "text/plain", "OK");
 }
 
+void handleNotFound() {
+  String uri = server.uri();
+  if (uri.endsWith(".ico") || uri.endsWith(".png")) {
+    server.send(404, "text/plain", "Not found");
+    return;
+  }
+  server.sendHeader("Location", "http://gambiarra.local/", true);
+  server.send(302, "text/plain", "");
+}
+
 void startConfigServer() {
   WiFi.softAP("Gambiarra-Config");
+
+  // Inicia o servidor DNS direcionando qualquer consulta para o IP local do ESP32
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+  // Inicia o serviço mDNS para responder em http://gambiarra.local
+  if (MDNS.begin("gambiarra")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("mDNS iniciado em gambiarra.local");
+  }
+
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/config", HTTP_GET, handleGetConfig);
   server.on("/api/config", HTTP_POST, handlePostConfig);
+  server.onNotFound(handleNotFound);
+
   server.begin();
   wifiConfigAtivo = true;
 }
 
 void stopConfigServer() {
   server.stop();
+  dnsServer.stop();
+  MDNS.end();
   WiFi.softAPdisconnect(true);
   wifiConfigAtivo = false;
 }
@@ -448,7 +444,7 @@ uint8_t getModifier(String mod) {
   if (mod == "CTRL") return KEY_LEFT_CTRL;
   if (mod == "SHIFT") return KEY_LEFT_SHIFT;
   if (mod == "ALT") return KEY_LEFT_ALT;
-  if (mod == "GUI" || mod == "META") return KEY_LEFT_GUI;
+  if (mod == "GUI" || mod == "META" || mod == "WIN") return KEY_LEFT_GUI;
   return 0;
 }
 
@@ -457,6 +453,28 @@ uint8_t getKey(String key) {
   if (key == "UP") return KEY_UP_ARROW;
   if (key == "LEFT") return KEY_LEFT_ARROW;
   if (key == "RIGHT") return KEY_RIGHT_ARROW;
+  if (key == "ENTER" || key == "RETURN") return KEY_RETURN;
+  if (key == "ESC") return KEY_ESC;
+  if (key == "TAB") return KEY_TAB;
+  if (key == "BACKSPACE") return KEY_BACKSPACE;
+  if (key == "SPACE") return ' ';
+  if (key == "DELETE") return KEY_DELETE;
+  if (key == "PAGE_UP") return KEY_PAGE_UP;
+  if (key == "PAGE_DOWN") return KEY_PAGE_DOWN;
+  if (key == "HOME") return KEY_HOME;
+  if (key == "END") return KEY_END;
+  if (key == "F1") return KEY_F1;
+  if (key == "F2") return KEY_F2;
+  if (key == "F3") return KEY_F3;
+  if (key == "F4") return KEY_F4;
+  if (key == "F5") return KEY_F5;
+  if (key == "F6") return KEY_F6;
+  if (key == "F7") return KEY_F7;
+  if (key == "F8") return KEY_F8;
+  if (key == "F9") return KEY_F9;
+  if (key == "F10") return KEY_F10;
+  if (key == "F11") return KEY_F11;
+  if (key == "F12") return KEY_F12;
   if (key.length() == 1) {
     char c = key.charAt(0);
     if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
@@ -533,6 +551,7 @@ void setup() {
 
 void loop() {
   if (wifiConfigAtivo) {
+    dnsServer.processNextRequest();
     server.handleClient();
   }
 
